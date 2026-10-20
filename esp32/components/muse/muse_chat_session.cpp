@@ -69,6 +69,7 @@ extern "C" {
 #include "muse_account_api.h"
 #include "muse_link.h"
 #include "muse_settings.h"
+#include "muse_tts.h"
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
@@ -961,6 +962,7 @@ static void turn_reset_streams(void)
 static void turn_finish(void)
 {
     turn_reset_streams();
+    muse_tts_abort();   /* an interrupted reply must not keep fetching its speech */
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
     s_turn.tts_msg = -1;
@@ -1519,26 +1521,28 @@ static void start_tts(void)
             continue;
         }
         /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
+         * Muse sends gadgets no audio, so the speech is fetched from a TTS API
+         * of our own (muse_tts.h) and decoded here. With none to be had (the
+         * speaker off, no text to send, or the fetch not starting), silence in
+         * its place paces the captions at reading pace and ends the turn; it is
+         * also where pump_tts() falls back to if the fetch brings nothing.
          */
+        const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+        bool speak = muse_settings_speaker_on() && muse_tts_begin(text);
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        m.pcm_frames = speak ? 0 : (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
-        s_turn.silent = true;
-        ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+        s_turn.silent = !speak;
+        if (speak) {
+            s_turn.mp3_len = 0;
+            s_turn.mp3_ended = false;
+            s_turn.kbps = 0;
+            s_turn.down_rate = 0;
+            mp3dec_init(&s_turn.dec);
+            mark(M_TTS);
+        }
+        ESP_LOGI(TAG, "%s message %s (%u chars)", speak ? "speaking" : "showing", m.id, (unsigned)m.len);
         show_reply_start(m);
         return;
     }
@@ -1568,6 +1572,40 @@ static void tts_end(stream_t *s, bool ok)
         s_turn.msgs[i].tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
     }
+}
+
+/*
+ * Moves fetched speech into the MP3 buffer while it has room, and gives up on
+ * the fetch if it brought nothing: a failed TTS shows the message at reading
+ * pace instead of leaving the turn stuck part-way through a reply.
+ */
+static void pump_tts(void)
+{
+    static uint8_t buf[1024];
+    if (s_turn.tts_msg < 0 || s_turn.silent) {
+        return;
+    }
+    size_t room = MP3_BUF - s_turn.mp3_len;
+    while (room) {
+        size_t n = muse_tts_read(buf, room < sizeof(buf) ? room : sizeof(buf));
+        if (!n) {
+            break;
+        }
+        tts_data(buf, n);
+        room -= n;
+    }
+    if (!muse_tts_ended()) {
+        return;
+    }
+    if (muse_tts_failed()) {
+        msg_t &m = s_turn.msgs[s_turn.tts_msg];
+        ESP_LOGW(TAG, "no speech for message %s; showing it at reading pace", m.id);
+        m.pcm_start = s_turn.pcm_out;
+        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        s_turn.silent = true;
+        return;
+    }
+    s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
 }
 
 /* Speaker off: queues the shown message's silence while the reply buffer has room. */
@@ -1997,6 +2035,7 @@ static void hatch_task(void *arg)
         }
         if (s_turn.phase == P_WAIT_REPLY) {
             start_tts();
+            pump_tts();
             decode();
         }
         if (!s_connected) {
