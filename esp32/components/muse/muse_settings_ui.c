@@ -96,6 +96,7 @@ static int64_t s_sdk_token_bad_us;   /* when an invalid SDK token was entered */
 static lv_obj_t *s_ble_sw, *s_ble_status;
 
 /* Sound page. */
+static lv_obj_t *s_pet_sw;
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
 
 /* Sleep page. */
@@ -1036,6 +1037,11 @@ static void on_speaker_sw(lv_event_t *e)
     muse_settings_set_speaker_on(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 
+static void on_pet_sw(lv_event_t *e)
+{
+    muse_settings_set_pet_on(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
 static void on_volume(lv_event_t *e)
 {
     int v = lv_slider_get_value(s_vol_sl);
@@ -1337,6 +1343,9 @@ static void build_home(lv_obj_t *tile)
     if (muse_board->power_off) {
         row(list, LV_SYMBOL_POWER, "Power off", NULL, on_nav, (void *)&POWER);
     }
+    if (muse_board->touch) {   /* its buttons are touch-only */
+        s_pet_sw = switch_row(list, "Digital pet", muse_settings_pet_on(), on_pet_sw);
+    }
     s_about = note(list, "");
 }
 
@@ -1372,6 +1381,11 @@ static void tick_home(void)
         snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? LV_SYMBOL_CHARGE " " : "", p.battery_pct);
     }
     set_text(s_home_battery, buf);
+
+    bool pet = muse_settings_pet_on();
+    if (s_pet_sw && pet != lv_obj_has_state(s_pet_sw, LV_STATE_CHECKED)) {
+        lv_obj_set_state(s_pet_sw, LV_STATE_CHECKED, pet);
+    }
 
     snprintf(buf, sizeof(buf), "Muse %s  -  %s", esp_app_get_description()->version,
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "offline");

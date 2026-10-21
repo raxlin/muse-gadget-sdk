@@ -1,5 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#include "muse_pet_icons.h"
 #include "muse_pixel.h"
 
 #include <math.h>
@@ -43,6 +44,10 @@ enum {
     C_ACC,
     C_SHADOW,
     C_HEART,
+    C_CARROT,
+    C_LEAF,
+    C_GIFT,
+    C_RIBBON,
     C_WHITE,
     C_COUNT,
 };
@@ -88,6 +93,10 @@ static const uint32_t FIXED[C_COUNT] = {
     [C_TONGUE] = 0xe86a7a,
     [C_SHADOW] = 0x16101f,
     [C_HEART] = 0xff4f8b,
+    [C_CARROT] = 0xff8a3d,
+    [C_LEAF] = 0x5fd16a,
+    [C_GIFT] = 0xff5c7a,
+    [C_RIBBON] = 0xffd24f,
     [C_WHITE] = 0xffffff,
 };
 
@@ -807,9 +816,26 @@ static void draw_thought_dots(float x, float y, float t)
     }
 }
 
-static void draw_hearts(float cx, float top, float t, float amount)
+/* What floats up while the character is happy: hearts when petted, and the
+ * matching item for whichever pet button was pressed. */
+static void draw_items(float cx, float top, float t, float amount, muse_reaction_t what)
 {
-    static const char *const HEART[] = { ".#.#.", "#o###", "#####", ".###.", "..#.." };
+    const char *const *art = MUSE_PET_HEART;
+    uint8_t fill = C_HEART, alt = C_WHITE;
+    switch (what) {
+    case MUSE_REACT_CARROT:
+        art = MUSE_PET_CARROT; fill = C_CARROT; alt = C_LEAF;
+        break;
+    case MUSE_REACT_NOTE:
+        art = MUSE_PET_NOTE; fill = C_WHITE; alt = C_ACC;
+        break;
+    case MUSE_REACT_GIFT:
+        art = MUSE_PET_GIFT; fill = C_GIFT; alt = C_RIBBON;
+        break;
+    case MUSE_REACT_HEART:
+    default:
+        break;
+    }
     for (int i = 0; i < 2; i++) {
         float ph = fracf(t * 0.9f + i * 0.5f);
         if (ph > amount) {
@@ -817,7 +843,7 @@ static void draw_hearts(float cx, float top, float t, float amount)
         }
         int hx = iround(cx + (i ? 13 : -18) + sinf(ph * TAU + i) * 2);
         int hy = iround(top - ph * 10);
-        stamp(HEART, 5, hx, hy, C_HEART, C_WHITE);
+        stamp(art, MUSE_PET_ART_H, hx, hy, fill, alt);
     }
 }
 
@@ -1077,7 +1103,7 @@ void muse_pixel_render(const muse_pose_t *p)
         draw_thought_dots(j.cx + 14, top + 2, t);
     }
     if (happy > 0) {
-        draw_hearts(j.cx, top + 1, t, happy);
+        draw_items(j.cx, top + 1, t, happy, p->reaction);
     }
     if (mode == MUSE_MODE_ERROR) {
         draw_alert(iround(j.cx + 18), iround(top - 1));

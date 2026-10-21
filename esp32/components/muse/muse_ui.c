@@ -39,6 +39,7 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#include "muse_pet_icons.h"
 #include "muse_pixel.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
@@ -61,6 +62,7 @@ static const char *TAG = "muse_ui";
 #define MINI_CELL_PX 2          /* Muse's grid cells over a reply that's read */
 #define ANSWER_MS 300           /* Muse making room for a reply, and back */
 #define SPEAKER_PX 64
+#define TAU_F 6.2831853f
 #define SPEAKER_GROW_PX 8       /* how much the speaker button swells while held */
 #define SPEAKER_HOLD_MS 400     /* LVGL's long press */
 
@@ -118,6 +120,7 @@ static lv_obj_t *s_pair_code;
 static lv_obj_t *s_pair_title;
 static lv_obj_t *s_pair_hint;
 static lv_obj_t *s_canvas;
+static lv_obj_t *s_pet[3];
 static lv_obj_t *s_mic_icon;
 static lv_obj_t *s_ptt_hint, *s_spk_hint, *s_pwr_hint;
 #if LV_USE_SNAPSHOT
@@ -610,6 +613,100 @@ static void build_speaker(lv_obj_t *face, int x, int y)
     show_speaker(muse_settings_speaker_on());
 }
 
+/*
+ * The pet's buttons: carrot, music note and gift box, at 10, 9 and 8 o'clock.
+ * Each throws up its own item (muse_pet_icons.h draws both), so the button and
+ * the character's reaction always match.
+ */
+#define PET_PX 52
+#define PET_ART_SCALE 6   /* 30x30: the square's corners stay inside the circle */
+
+typedef struct {
+    const char *const *art;
+    uint32_t fill, alt;
+    muse_reaction_t react;
+    const char *caption;
+} pet_btn_t;
+
+static const pet_btn_t PET_BUTTONS[3] = {
+    { MUSE_PET_CARROT, 0xff8a3d, 0x5fd16a, MUSE_REACT_CARROT, "FED" },
+    { MUSE_PET_NOTE, 0xffffff, 0xa77dff, MUSE_REACT_NOTE, "DANCING" },
+    { MUSE_PET_GIFT, 0xff5c7a, 0xffd24f, MUSE_REACT_GIFT, "A GIFT" },
+};
+
+/* Blows one of the 5x5 patterns up into an icon, chunky pixels and all. */
+static lv_image_dsc_t *pet_icon(const pet_btn_t *b)
+{
+    int w = MUSE_PET_ART_W * PET_ART_SCALE, h = MUSE_PET_ART_H * PET_ART_SCALE;
+    size_t bytes = (size_t)w * h * 4;
+    lv_image_dsc_t *dsc = lv_malloc_zeroed(sizeof(*dsc));
+    uint8_t *buf = lv_malloc_zeroed(bytes);
+    if (!dsc || !buf) {
+        lv_free(dsc);
+        lv_free(buf);
+        return NULL;
+    }
+    for (int r = 0; r < MUSE_PET_ART_H; r++) {
+        for (int c = 0; c < MUSE_PET_ART_W; c++) {
+            char ch = b->art[r][c];
+            if (ch != '#' && ch != 'o') {
+                continue;
+            }
+            uint32_t rgb = ch == '#' ? b->fill : b->alt;
+            for (int y = 0; y < PET_ART_SCALE; y++) {
+                for (int x = 0; x < PET_ART_SCALE; x++) {
+                    uint8_t *q = buf + (((size_t)(r * PET_ART_SCALE + y)) * w + c * PET_ART_SCALE + x) * 4;
+                    q[0] = (uint8_t)(rgb & 0xff);
+                    q[1] = (uint8_t)((rgb >> 8) & 0xff);
+                    q[2] = (uint8_t)((rgb >> 16) & 0xff);
+                    q[3] = 0xff;
+                }
+            }
+        }
+    }
+    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc->header.cf = LV_COLOR_FORMAT_ARGB8888;
+    dsc->header.w = (uint32_t)w;
+    dsc->header.h = (uint32_t)h;
+    dsc->header.stride = (uint32_t)(w * 4);
+    dsc->data_size = (uint32_t)bytes;
+    dsc->data = buf;
+    return dsc;
+}
+
+static void on_pet_event(lv_event_t *e)
+{
+    const pet_btn_t *b = lv_event_get_user_data(e);
+    muse_state_react(b->react);
+    if (muse_state_mode(NULL) == MUSE_MODE_IDLE) {   /* don't cover a reply's captions */
+        muse_state_set_caption("%s", b->caption);
+    }
+}
+
+static void build_pet_button(lv_obj_t *face, int i, int x, int y)
+{
+    const pet_btn_t *b = &PET_BUTTONS[i];
+    lv_obj_t *o = lv_obj_create(face);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, PET_PX, PET_PX);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(COLOR_METER_OFF), 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_ext_click_area(o, 10);   /* a fingertip is bigger than the circle */
+    lv_obj_add_event_cb(o, on_pet_event, LV_EVENT_SHORT_CLICKED, (void *)b);
+    lv_image_dsc_t *dsc = pet_icon(b);
+    if (dsc) {
+        lv_obj_t *img = lv_image_create(o);
+        lv_image_set_src(img, dsc);
+        lv_obj_center(img);
+        lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_align(o, LV_ALIGN_CENTER, x, y);
+    lv_obj_set_flag(o, LV_OBJ_FLAG_HIDDEN, !muse_settings_pet_on());
+    s_pet[i] = o;
+}
+
 static void set_canvas_px(int px)
 {
     if ((int)s_muse_src.header.w == px) {
@@ -741,6 +838,19 @@ static void build_answer(lv_obj_t *face, int ring_in)
         int d = ring_in - spk_r - 4;   /* just inside the ring, even when swollen */
         spk_x = -(int)sqrtf((float)(d * d - spk_y * spk_y));
     }
+    /* The pet's buttons: 10, 9 and 8 o'clock, clear of the speaker above them. */
+    int pet_x[3], pet_y[3];
+    int pet_d = ring_in - PET_PX / 2 - 4;
+    for (int i = 0; i < 3; i++) {
+        if (muse_board->round) {
+            float th = (-60.0f - 30.0f * i) * (TAU_F / 360.0f);
+            pet_x[i] = (int)lroundf(pet_d * sinf(th));
+            pet_y[i] = (int)lroundf(-pet_d * cosf(th));
+        } else {
+            pet_x[i] = spk_x;
+            pet_y[i] = spk_y + (i + 1) * (PET_PX + 8);
+        }
+    }
     const lv_font_t *font = caption_font();
     int cw = lv_font_get_glyph_width(font, 'M', ' ');
     int pitch = lv_font_get_line_height(font) + CAPTION_LINE_SPACE;
@@ -798,6 +908,9 @@ static void build_answer(lv_obj_t *face, int ring_in)
 
     if (muse_board->touch && !muse_board->rim_controls) {
         build_speaker(face, spk_x, spk_y);
+        for (int i = 0; i < 3; i++) {
+            build_pet_button(face, i, pet_x[i], pet_y[i]);
+        }
     }
 
     /* Out of the way while a page is up: the mode name, where Muse was. */
@@ -1618,6 +1731,14 @@ static void frame_tick(lv_timer_t *timer)
     }
 #endif
     update_control_hints(muse_state_mode(NULL));
+    if (s_pet[0]) {
+        bool pet = muse_settings_pet_on();
+        if (pet == lv_obj_has_flag(s_pet[0], LV_OBJ_FLAG_HIDDEN)) {
+            for (int i = 0; i < 3; i++) {
+                lv_obj_set_flag(s_pet[i], LV_OBJ_FLAG_HIDDEN, !pet);
+            }
+        }
+    }
     if (s_snapshot) {
         s_snapshot = false;
         send_snapshot();
@@ -1662,6 +1783,7 @@ static void frame_tick(lv_timer_t *timer)
         .mode_t = mode_t,
         .level = s_level,
         .happy = muse_state_happiness(),
+        .reaction = muse_state_reaction(),
     };
     if (!muse_board->epaper || mode != s_last_epaper_pose) {
         muse_pixel_render(&pose);

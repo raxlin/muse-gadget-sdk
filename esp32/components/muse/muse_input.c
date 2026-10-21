@@ -673,22 +673,36 @@ static void set_face(const char *name)
         [MUSE_MODE_ERROR] = "error",
         [MUSE_MODE_OFF] = "off",
     };
+    /* The pet's reactions, so the buttons can be exercised from the bench. */
+    static const struct {
+        const char *name;
+        muse_reaction_t react;
+    } REACTS[] = {
+        { "happy", MUSE_REACT_HEART },
+        { "carrot", MUSE_REACT_CARROT },
+        { "note", MUSE_REACT_NOTE },
+        { "gift", MUSE_REACT_GIFT },
+    };
     muse_state_poke();
-    bool happy = !strcmp(name, "happy");
-    if (happy) {
-        name = "idle";   /* where a finished turn hops to */
+    int react = -1;
+    for (size_t i = 0; i < sizeof(REACTS) / sizeof(REACTS[0]); i++) {
+        if (!strcmp(name, REACTS[i].name)) {
+            react = (int)i;
+            name = "idle";   /* where a finished turn hops to */
+            break;
+        }
     }
     for (int m = 0; m < MUSE_MODE_COUNT; m++) {
         if (!strcmp(name, modes[m])) {
             muse_state_set_mode(MUSE_MODE_IDLE);   /* only idle leaves "off" */
             muse_state_set_mode((muse_mode_t)m);
-            if (happy) {
-                muse_state_make_happy();
+            if (react >= 0) {
+                muse_state_react(REACTS[react].react);
             }
             return;
         }
     }
-    printf("@face.error unknown face \"%s\": boot idle listening thinking speaking error off happy\n", name);
+    printf("@face.error unknown face \"%s\": boot idle listening thinking speaking error off happy carrot note gift\n", name);
     fflush(stdout);
 }
 

@@ -92,6 +92,15 @@ bool muse_state_asleep(void);
 void muse_state_wait_awake(uint32_t timeout_ms);
 void muse_state_nudge(void);
 
-/* Touch/pet reaction. */
-void muse_state_make_happy(void);
+/* Touch/pet reaction. What the character throws up while it's happy. */
+typedef enum {
+    MUSE_REACT_HEART = 0,   /* petted: the default */
+    MUSE_REACT_CARROT,      /* fed */
+    MUSE_REACT_NOTE,        /* dancing */
+    MUSE_REACT_GIFT,        /* given a present */
+} muse_reaction_t;
+
+void muse_state_make_happy(void);           /* hearts */
+void muse_state_react(muse_reaction_t r);   /* happy, with items of its own */
+muse_reaction_t muse_state_reaction(void);
 float muse_state_happiness(void);

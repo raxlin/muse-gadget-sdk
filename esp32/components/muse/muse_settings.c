@@ -39,6 +39,7 @@ static struct {
     uint16_t sleep_s;
     bool wifi_on;
     bool ble_on;
+    bool pet_on;
     char ssid[MUSE_SSID_MAX + 1];
     char pass[MUSE_PASS_MAX + 1];
     char host[MUSE_HOST_MAX + 1];
@@ -51,6 +52,7 @@ static struct {
     .brightness = 100,
     .sleep_s = 120,
     .wifi_on = true,
+    .pet_on = true,
     .host = DEFAULT_HOST,
 };
 
@@ -124,6 +126,9 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
     }
+    if (nvs_get_u8(s_nvs, "pet", &b) == ESP_OK) {
+        s.pet_on = b;
+    }
     if (nvs_get_u8(s_nvs, "ble_on", &b) == ESP_OK) {
         s.ble_on = b;
     }
@@ -149,6 +154,7 @@ void muse_settings_set_listener(muse_setting_cb_t cb)
 
 int muse_settings_volume(void) { return s.volume; }
 bool muse_settings_speaker_on(void) { return s.speaker_on; }
+bool muse_settings_pet_on(void) { return s.pet_on; }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
@@ -203,6 +209,13 @@ void muse_settings_set_speaker_on(bool on)
     s.speaker_on = on;
     save_u8("speaker", on);
     notify(MUSE_SETTING_SPEAKER);
+}
+
+void muse_settings_set_pet_on(bool on)
+{
+    s.pet_on = on;
+    save_u8("pet", on);
+    notify(MUSE_SETTING_PET);
 }
 
 void muse_settings_set_mic_gain(int db)

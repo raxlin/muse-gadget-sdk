@@ -38,6 +38,7 @@ static volatile float s_level;
 static volatile float s_progress;
 static volatile int64_t s_last_poke_us;
 static volatile int64_t s_happy_until_us;
+static volatile muse_reaction_t s_reaction;
 static volatile bool s_asleep;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -233,8 +234,19 @@ void muse_state_nudge(void)
 
 void muse_state_make_happy(void)
 {
+    muse_state_react(MUSE_REACT_HEART);
+}
+
+void muse_state_react(muse_reaction_t r)
+{
+    s_reaction = r;
     s_happy_until_us = esp_timer_get_time() + (int64_t)(HAPPY_SECS * 1e6f);
     muse_state_poke();
+}
+
+muse_reaction_t muse_state_reaction(void)
+{
+    return s_reaction;
 }
 
 float muse_state_happiness(void)
